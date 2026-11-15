@@ -1,0 +1,21 @@
+# Dados (415 MB, não versionar)
+data/
+pa3_dados/
+*.zip
+
+# Checkpoints de treino (o modelo final vai em weights/ ou em link externo)
+checkpoints/
+*.pt
+*.pth
+!weights/modelo_final.pt
+
+# Python / Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.pytest_cache/
+.venv/
+venv/
+
+# Sistema
+.DS_Store
