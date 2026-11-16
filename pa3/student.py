@@ -51,7 +51,7 @@ def build_targets(teacher_logits: torch.Tensor, mode: str, temperature: float, l
 
 def soft_cross_entropy(logits: torch.Tensor, targets: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
     per_sample = -(targets * F.log_softmax(logits, dim=1)).sum(1)
-    return (weights * per_sample).sum() / weights.sum()
+    return (weights * per_sample).sum() / weights.sum().clamp_min(1e-8)
 
 
 def fit_soft(model, train_ds: SoftDataset, val_ds, cfg: FitConfig, device, num_classes: int, seed: int = 0,

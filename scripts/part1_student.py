@@ -1,15 +1,6 @@
-"""Parte 1, Trilha C — passo 2: o aluno (ResNet-18) aprende dos pseudo-rótulos do professor.
-
-Pré-requisito: scripts/part1_teacher.py já rodou (usa os embeddings salvos em checkpoints/).
-O aluno treina em todo o train: pseudo-rótulos do professor + rótulos verdadeiros do orçamento.
-A época é escolhida no val; o test_public é avaliado uma única vez, no fim.
-
-    python scripts/part1_student.py --data /caminho/pa3_dados --budget 5 --seed 0 --targets hard
-"""
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from pathlib import Path
@@ -21,9 +12,10 @@ import pandas as pd  # noqa: E402
 import torch  # noqa: E402
 
 from pa3 import F1_TETO_MONITOR, ORCAMENTO_PADRAO, ORCAMENTOS  # noqa: E402
+from pa3.calibrate import calibrate_teacher  # noqa: E402
 from pa3.data import (check_splits, find_root, ids_have_extension, load_split, make_eval_ds,  # noqa: E402
                       read_classes, train_transform)
-from pa3.metrics import memorization_summary, plot_confusion, plot_history  # noqa: E402
+from pa3.metrics import memorization_summary, plot_confusion, plot_history, summarize  # noqa: E402
 from pa3.models import build_model, check_param_budget, save_checkpoint  # noqa: E402
 from pa3.student import SoftDataset, build_targets, fit_soft  # noqa: E402
 from pa3.teacher import zero_shot_logits  # noqa: E402
@@ -40,7 +32,11 @@ def parse_args(argv=None):
     p.add_argument("--targets", default="hard", choices=["hard", "soft"], help="pseudo-rótulos duros ou suaves")
     p.add_argument("--temperature", type=float, default=1.0, help="temperatura do softmax (só em --targets soft)")
     p.add_argument("--true-weight", type=float, default=5.0, help="peso das imagens com rótulo verdadeiro")
-    p.add_argument("--variant", default=None, help="nome do método em curva_orcamento.csv (padrão: aluno_<targets>)")
+    p.add_argument("--calibrate", action="store_true",
+                   help="professor melhorado: viés por classe + temperatura aprendidos nos rótulos do orçamento")
+    p.add_argument("--filter-tau", type=float, default=0.0,
+                   help="ignora pseudo-rótulos com confiança do professor < tau (0 = não filtra)")
+    p.add_argument("--variant", default=None, help="nome do método em curva_orcamento.csv (padrão: automático)")
     p.add_argument("--img-size", type=int, default=224)
     p.add_argument("--load-size", type=int, default=256)
     p.add_argument("--epochs", type=int, default=15)
@@ -57,7 +53,8 @@ def parse_args(argv=None):
 
 def main(argv=None) -> dict:
     args = parse_args(argv)
-    variant = args.variant or f"aluno_{args.targets}"
+    variant = args.variant or (f"aluno_{args.targets}" + ("_cal" if args.calibrate else "")
+                               + (f"_f{round(args.filter_tau * 100)}" if args.filter_tau > 0 else ""))
     root = find_root(args.data)
     classes = read_classes(root)
     K = len(classes)
@@ -72,18 +69,46 @@ def main(argv=None) -> dict:
     if not cache.exists():
         sys.exit(f"Não achei {cache}. Rode antes: python scripts/part1_teacher.py --teacher {args.teacher}")
     c = torch.load(cache, weights_only=True)
-    t_logits = zero_shot_logits(c["train"].float(), c["text"].float(), c["scale"])
-    assert len(t_logits) == len(train), "embeddings do professor não batem com o train atual"
+    txt, scale = c["text"].float(), c["scale"]
+    zs_train = zero_shot_logits(c["train"].float(), txt, scale)
+    zs_test = zero_shot_logits(c["test"].float(), txt, scale)
+    assert len(zs_train) == len(train) and len(zs_test) == len(test_items), \
+        "embeddings do professor não batem com train/test_public atuais"
 
     pos = {Path(i.image_id).stem: n for n, i in enumerate(train)}
     lab_idx = np.array([pos[Path(i.image_id).stem] for i in labeled])
     lab_y = np.array([i.label for i in labeled])
-    targets, weights = build_targets(t_logits, args.targets, args.temperature, lab_idx, lab_y, args.true_weight)
-    agree = float((t_logits.argmax(1).numpy() == targets.argmax(1).numpy()).mean())
-    print(f"Aluno '{variant}' | alvos {args.targets} | dispositivo {device} | train {len(train)} "
-          f"({len(labeled)} com rótulo verdadeiro, peso {args.true_weight}) | alvo = professor em {agree:.1%}")
+    y_test = np.array([i.label for i in test_items])
 
-    train_ds = SoftDataset(train, args.load_size, train_transform(args.img_size), targets, weights)
+    # Professor zero-shot (referência) e, se pedido, o professor melhorado com os rótulos do orçamento.
+    t_logits, t_test_logits, cal_info = zs_train, zs_test, None
+    teacher_zs = summarize(y_test, zs_test.argmax(1).numpy(), K)
+    teacher_cal = None
+    if args.calibrate:
+        cal, lam = calibrate_teacher(zs_train[lab_idx], torch.as_tensor(lab_y), K)
+        t_logits, t_test_logits = cal.apply(zs_train), cal.apply(zs_test)
+        teacher_cal = summarize(y_test, t_test_logits.argmax(1).numpy(), K)
+        cal_info = {"lambda": lam, "temperatura": float(cal.log_t.exp()), "vies": dict(zip(classes, cal.b.tolist()))}
+        print(f"Professor melhorado (viés+temperatura, λ={lam}, T={float(cal.log_t.exp()):.2f}): "
+              f"F1 test {teacher_cal['f1_macro']:.3f} (zero-shot {teacher_zs['f1_macro']:.3f}) [diagnóstico]")
+
+    targets, weights = build_targets(t_logits, args.targets, args.temperature, lab_idx, lab_y, args.true_weight)
+    conf = t_logits.softmax(1).max(1).values
+    pseudo = torch.ones(len(train), dtype=torch.bool)
+    pseudo[torch.as_tensor(lab_idx)] = False
+    if args.filter_tau > 0:
+        weights[pseudo & (conf < args.filter_tau)] = 0.0
+    used = pseudo & (weights > 0)
+    counts = torch.bincount(targets.argmax(1)[used], minlength=K)
+    top = ", ".join(f"{classes[k]} {int(counts[k])}" for k in counts.argsort(descending=True)[:3])
+    print(f"Aluno '{variant}' | alvos {args.targets} | dispositivo {device} | train {len(train)}: "
+          f"{int(used.sum())} pseudo-rótulos usados + {len(labeled)} verdadeiros (peso {args.true_weight})")
+    print(f"  maiores classes entre os pseudo-rótulos usados: {top} | woodchuck: "
+          f"{int(counts[classes.index('woodchuck')]) if 'woodchuck' in classes else '-'}")
+
+    keep = weights > 0  # imagens filtradas saem do treino (poupa tempo e evita lote sem peso)
+    train_ds = SoftDataset([it for it, k in zip(train, keep.tolist()) if k], args.load_size,
+                           train_transform(args.img_size), targets[keep], weights[keep])
     val_ds, test_ds = make_eval_ds(val_items, args.img_size), make_eval_ds(test_items, args.img_size)
 
     model = build_model("resnet18", K, pretrained=not args.no_pretrained)
@@ -102,30 +127,40 @@ def main(argv=None) -> dict:
                    f"{variant}: F1 macro {test['f1_macro']:.3f} / acc {test['acc']:.3f} (test_public)")
 
     # Aluno x professor por classe (o professor foi medido em part1_teacher.py).
-    t_json = Path("results/part1") / args.teacher / "metrics.json"
-    t_f1 = json.loads(t_json.read_text())["f1_por_classe_test"] if t_json.exists() else {}
+    t_f1 = dict(zip(classes, teacher_zs["f1_per_class"]))
+    c_f1 = dict(zip(classes, teacher_cal["f1_per_class"])) if teacher_cal else {}
     s_f1 = dict(zip(classes, test["f1_per_class"]))
     summary = {
         "variant": variant, "params": n_params, "budget": args.budget, "seed": args.seed,
         "best_epoch": best_epoch, "memorizacao": memorization_summary(history),
         "val": {k: v for k, v in val.items() if k != "logits"},
         "test_public": {k: v for k, v in test.items() if k != "logits"},
-        "f1_por_classe_aluno": s_f1, "f1_por_classe_professor": t_f1, "args": vars(args), "commit": git_commit(),
+        "f1_por_classe_aluno": s_f1, "f1_por_classe_professor": t_f1, "f1_por_classe_professor_cal": c_f1,
+        "professor_zero_shot": {k: v for k, v in teacher_zs.items() if k != "confusion"},
+        "professor_calibrado": ({k: v for k, v in teacher_cal.items() if k != "confusion"} if teacher_cal else None),
+        "calibracao": cal_info, "pseudo_rotulos_usados": int(used.sum()),
+        "args": vars(args), "commit": git_commit(),
     }
     save_json(summary, out / "metrics.json")
     save_checkpoint(Path(args.ckpt_dir) / f"{name}.pt", model, "resnet18", classes, args.img_size,
                     ids_have_extension(labeled), extra={"variant": variant, "budget": args.budget, "seed": args.seed})
     append_curve(args.curve_csv, variant, args.budget, args.seed, test["f1_macro"], test["acc"])
+    append_curve(args.curve_csv, "professor", args.budget, args.seed, teacher_zs["f1_macro"], teacher_zs["acc"])
+    if teacher_cal:
+        append_curve(args.curve_csv, "professor_cal", args.budget, args.seed, teacher_cal["f1_macro"], teacher_cal["acc"])
 
     print(f"\n=== Aluno '{variant}': época {best_epoch} | val F1 {val['f1_macro']:.3f} | "
           f"test_public F1 macro {test['f1_macro']:.3f} | acurácia {test['acc']:.3f} "
           f"(teto do monitor {F1_TETO_MONITOR:.3f})")
-    if t_f1:
-        print(f"\n{'classe':<24}{'professor':>10}{'aluno':>8}{'aluno-prof':>12}")
-        for k in classes:
-            d = s_f1[k] - t_f1[k]
-            print(f"{k:<24}{t_f1[k]:>10.2f}{s_f1[k]:>8.2f}{d:>+12.2f}" + ("  <- aluno melhor" if d > 0.05 else ""))
-        print(f"\nProfessor: F1 macro {np.mean(list(t_f1.values())):.3f} | Aluno: {test['f1_macro']:.3f}")
+    head = f"{'classe':<24}{'prof.':>7}" + (f"{'prof.cal':>9}" if c_f1 else "") + f"{'aluno':>7}{'al-prof':>9}"
+    print("\n" + head)
+    for k in classes:
+        d = s_f1[k] - t_f1[k]
+        print(f"{k:<24}{t_f1[k]:>7.2f}" + (f"{c_f1[k]:>9.2f}" if c_f1 else "") + f"{s_f1[k]:>7.2f}{d:>+9.2f}"
+              + ("  <- aluno melhor" if d > 0.05 else ""))
+    print(f"\nProfessor zero-shot: F1 macro {teacher_zs['f1_macro']:.3f}"
+          + (f" | professor melhorado: {teacher_cal['f1_macro']:.3f}" if teacher_cal else "")
+          + f" | Aluno: {test['f1_macro']:.3f}")
     return summary
 
 
