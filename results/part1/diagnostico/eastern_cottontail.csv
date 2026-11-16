@@ -1,0 +1,6 @@
+grupo,n,brilho_medio,cinza(%),tamanho_mais_comum,tamanho(%),n_tamanhos
+"train (eastern_cottontail, pseudo)",182,77.0,60,512x367,52,5
+"val (eastern_cottontail, real)",10,75.7,100,512x367,70,2
+"test (eastern_cottontail, real)",26,53.7,100,512x367,77,3
+train (outras classes),400,90.2,56,512x367,44,4
+test (outras classes),400,89.8,46,512x367,50,4
