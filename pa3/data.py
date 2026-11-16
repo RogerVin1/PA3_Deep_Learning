@@ -228,14 +228,21 @@ def load_image(path: Path, size: int) -> Image.Image:
         return Image.new("RGB", (size, size), (124, 116, 104))
 
 
-def train_transform(img_size: int = 224, scale=(0.5, 1.0)) -> T.Compose:
-    """Aumentação do treino supervisionado. `scale` baixo demais corta o animal fora."""
+def train_transform(img_size: int = 224, scale=(0.5, 1.0), photo: str = "padrao") -> T.Compose:
+    """Aumentação do treino supervisionado. `scale` baixo demais corta o animal fora.
+
+    photo="forte": escurece bastante (brilho 0.35–1.15) e converte 40% das imagens para cinza, para o
+    modelo não associar uma classe a "foto clara/colorida" (valores fixos, definidos antes de ver o test).
+    """
+    if photo == "forte":
+        color = [T.ColorJitter(brightness=(0.35, 1.15), contrast=0.4, saturation=0.2), T.RandomGrayscale(0.4)]
+    else:
+        color = [T.ColorJitter(0.3, 0.3, 0.2), T.RandomGrayscale(0.1)]  # fotos noturnas (IR) são sem cor
     return T.Compose([
         T.RandomResizedCrop(img_size, scale=scale, ratio=(3 / 4, 4 / 3),
                             interpolation=T.InterpolationMode.BICUBIC, antialias=True),
         T.RandomHorizontalFlip(),
-        T.ColorJitter(0.3, 0.3, 0.2),
-        T.RandomGrayscale(0.1),  # fotos noturnas (infravermelho) são sem cor
+        *color,
         T.ToTensor(),
         T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
     ])

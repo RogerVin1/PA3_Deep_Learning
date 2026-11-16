@@ -36,6 +36,8 @@ def parse_args(argv=None):
                    help="professor melhorado: viés por classe + temperatura aprendidos nos rótulos do orçamento")
     p.add_argument("--filter-tau", type=float, default=0.0,
                    help="ignora pseudo-rótulos com confiança do professor < tau (0 = não filtra)")
+    p.add_argument("--photo-aug", default="padrao", choices=["padrao", "forte"],
+                   help="forte: mais variação de brilho e mais imagens em cinza (robustez a imagens noturnas)")
     p.add_argument("--variant", default=None, help="nome do método em curva_orcamento.csv (padrão: automático)")
     p.add_argument("--img-size", type=int, default=224)
     p.add_argument("--load-size", type=int, default=256)
@@ -54,6 +56,7 @@ def parse_args(argv=None):
 def main(argv=None) -> dict:
     args = parse_args(argv)
     variant = args.variant or (f"aluno_{args.targets}" + ("_cal" if args.calibrate else "")
+                               + ("_foto" if args.photo_aug == "forte" else "")
                                + (f"_f{round(args.filter_tau * 100)}" if args.filter_tau > 0 else ""))
     root = find_root(args.data)
     classes = read_classes(root)
@@ -108,7 +111,7 @@ def main(argv=None) -> dict:
 
     keep = weights > 0  # imagens filtradas saem do treino (poupa tempo e evita lote sem peso)
     train_ds = SoftDataset([it for it, k in zip(train, keep.tolist()) if k], args.load_size,
-                           train_transform(args.img_size), targets[keep], weights[keep])
+                           train_transform(args.img_size, photo=args.photo_aug), targets[keep], weights[keep])
     val_ds, test_ds = make_eval_ds(val_items, args.img_size), make_eval_ds(test_items, args.img_size)
 
     model = build_model("resnet18", K, pretrained=not args.no_pretrained)

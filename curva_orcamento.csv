@@ -2,6 +2,7 @@ metodo,orcamento,seed,f1_macro,acuracia
 aluno_hard,5,0,0.5501,0.5993
 aluno_soft_T1,5,0,0.568,0.6054
 aluno_soft_cal,5,0,0.6524,0.6782
+aluno_soft_cal_foto,5,0,0.6451,0.6794
 piso,5,0,0.4185,0.439
 professor,5,0,0.6678,0.6732
 professor_cal,5,0,0.7318,0.73
