@@ -1,0 +1,9 @@
+grupo,n,acuracia,previsto_woodchuck(%)
+todas,811,0.673,15.2
+noite (cinza),391,0.803,3.3
+dia (colorida),420,0.552,26.2
+terço mais escuro,271,0.823,2.2
+terço médio,269,0.52,19.7
+terço mais claro,271,0.675,23.6
+classes pequenas,275,0.429,36.0
+classes grandes,536,0.799,4.5

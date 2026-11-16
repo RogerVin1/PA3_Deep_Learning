@@ -1,0 +1,11 @@
+verdadeira,prevista,n,fracao_da_classe
+eastern_chipmunk,woodchuck,27,0.87
+chicken,woodchuck,17,0.28
+chicken,domestic_cat,16,0.27
+dog,coyote,15,0.22
+eastern_gray_squirrel,woodchuck,14,0.41
+bird,woodchuck,11,0.5
+dog,domestic_cat,11,0.16
+red_fox,grey_fox,9,0.21
+domestic_cat,bobcat,7,0.15
+eastern_fox_squirrel,eastern_gray_squirrel,7,0.22
