@@ -1,0 +1,13 @@
+metodo,orcamento,f1_media,f1_desvio,acc_media,acc_desvio,seeds
+aluno_soft_cal,1,0.5845,,0.6141,,1
+aluno_soft_cal,5,0.6567,0.0112,0.6765,0.0124,3
+aluno_soft_cal,20,0.6653,,0.6954,,1
+piso,1,0.2513,,0.238,,1
+piso,5,0.4379,0.0169,0.4686,0.0263,3
+piso,20,0.6033,,0.6523,,1
+professor,1,0.6679,,0.6732,,1
+professor,5,0.6679,0.0001,0.6732,0.0,3
+professor,20,0.6679,,0.6732,,1
+professor_cal,1,0.6834,,0.688,,1
+professor_cal,5,0.7311,0.0006,0.7291,0.0008,3
+professor_cal,20,0.7324,,0.746,,1
