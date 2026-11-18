@@ -1,0 +1,9 @@
+tipo,image_id,verdadeira,prevista,confianca,brilho_medio,cinza
+erro,4ba11c1e790b001a,eastern_cottontail,domestic_cat,0.942,50.5,True
+erro,05a44977de91004a,striped_skunk,american_black_bear,0.87,128.6,True
+erro,7ef4eed7627557bd,grey_fox,red_fox,0.738,24.9,True
+acerto,c63c4a7c612f8716,american_crow,american_crow,0.455,94.2,False
+acerto,185e439a74536df5,bobcat,bobcat,0.247,70.7,True
+acerto,a65d2a70a8e9ded7,red_fox,red_fox,0.527,94.4,True
+acerto,d3caa0296d3251f7,virginia_opossum,virginia_opossum,0.998,43.1,True
+acerto,3f96210fe206163f,woodchuck,woodchuck,0.489,120.5,False
